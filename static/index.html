@@ -30,6 +30,14 @@
         margin-right: 0.25rem;
         font-size: 0.85rem;
       }
+      .chip.ok {
+        background: #d1fae5;
+        color: #065f46;
+      }
+      .chip.bad {
+        background: #fee2e2;
+        color: #991b1b;
+      }
     </style>
   </head>
   <body>
@@ -100,6 +108,17 @@
 
       function updateDescription() {
         const tool = tools.find((t) => t.name === select.value);
+        if (!tool) {
+          description.textContent = '';
+          runBtn.setAttribute('disabled', 'true');
+          return;
+        }
+
+        const availability = tool.available
+          ? '<span class="chip ok">Binary found in PATH</span>'
+          : '<span class="chip bad">Binary missing from PATH</span>';
+        description.innerHTML = `${tool.description} ${availability}`;
+        runBtn.toggleAttribute('disabled', !tool.available);
         description.textContent = tool ? tool.description : '';
       }
 

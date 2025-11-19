@@ -2,6 +2,9 @@ from __future__ import annotations
 
 import asyncio
 import shlex
+import shutil
+from pathlib import Path
+from typing import AsyncGenerator, TypedDict
 from pathlib import Path
 from typing import AsyncGenerator
 
@@ -9,6 +12,10 @@ from fastapi import FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
+from fastapi.openapi.docs import (
+    get_swagger_ui_html,
+    get_swagger_ui_oauth2_redirect_html,
+)
 
 BASE_DIR = Path(__file__).resolve().parent
 STATIC_DIR = BASE_DIR.parent / "static"
@@ -20,6 +27,9 @@ app = FastAPI(
         "Outputs stream in real time and every endpoint is documented via Swagger."
     ),
     version="0.1.0",
+    docs_url=None,
+    redoc_url=None,
+    openapi_url="/swagger/openapi.json",
 )
 
 app.add_middleware(
@@ -29,6 +39,13 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+class ToolInfo(TypedDict):
+    name: str
+    binary: str
+    description: str
+    available: bool
+
 
 TOOLS = {
     "fuzz": {
@@ -65,6 +82,16 @@ TOOLS = {
 
 
 @app.get("/tools")
+async def list_tools() -> list[ToolInfo]:
+    """Return the configured tools along with their binaries and descriptions."""
+
+    return [
+        {
+            "name": name,
+            "binary": cfg["binary"],
+            "description": cfg["description"],
+            "available": shutil.which(cfg["binary"]) is not None,
+        }
 async def list_tools() -> list[dict[str, str]]:
     """Return the configured tools along with their binaries and descriptions."""
 
@@ -114,6 +141,14 @@ async def run_tool(
     if tool_name not in TOOLS:
         raise HTTPException(status_code=404, detail="Unknown tool")
 
+    binary = shutil.which(TOOLS[tool_name]["binary"])
+    if not binary:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Binary '{TOOLS[tool_name]['binary']}' was not found in PATH. Install it or update the TOOLS mapping.",
+        )
+
+    command = [binary]
     command = [TOOLS[tool_name]["binary"]]
     command.extend(args)
     if target:
@@ -127,6 +162,22 @@ async def serve_ui() -> FileResponse:
     """Serve the minimal UI that orchestrates tool runs."""
 
     return FileResponse(STATIC_DIR / "index.html")
+
+
+@app.get("/swagger", include_in_schema=False)
+async def overridden_swagger() -> StreamingResponse:
+    """Serve Swagger UI backed by the generated OpenAPI schema."""
+
+    return get_swagger_ui_html(
+        openapi_url=app.openapi_url,
+        title=f"{app.title} - Swagger UI",
+        oauth2_redirect_url="/swagger/oauth2-redirect",
+    )
+
+
+@app.get("/swagger/oauth2-redirect", include_in_schema=False)
+async def swagger_redirect() -> StreamingResponse:
+    return get_swagger_ui_oauth2_redirect_html()
 
 
 app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
