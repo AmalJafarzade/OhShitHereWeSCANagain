@@ -119,6 +119,7 @@
           : '<span class="chip bad">Binary missing from PATH</span>';
         description.innerHTML = `${tool.description} ${availability}`;
         runBtn.toggleAttribute('disabled', !tool.available);
+        description.textContent = tool ? tool.description : '';
       }
 
       function stopStream() {

@@ -5,6 +5,8 @@ import shlex
 import shutil
 from pathlib import Path
 from typing import AsyncGenerator, TypedDict
+from pathlib import Path
+from typing import AsyncGenerator
 
 from fastapi import FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
@@ -90,6 +92,11 @@ async def list_tools() -> list[ToolInfo]:
             "description": cfg["description"],
             "available": shutil.which(cfg["binary"]) is not None,
         }
+async def list_tools() -> list[dict[str, str]]:
+    """Return the configured tools along with their binaries and descriptions."""
+
+    return [
+        {"name": name, "binary": cfg["binary"], "description": cfg["description"]}
         for name, cfg in TOOLS.items()
     ]
 
@@ -142,6 +149,7 @@ async def run_tool(
         )
 
     command = [binary]
+    command = [TOOLS[tool_name]["binary"]]
     command.extend(args)
     if target:
         command.append(target)
