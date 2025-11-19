@@ -19,6 +19,13 @@ Open <http://localhost:8000> for the UI or <http://localhost:8000/swagger> for S
 
 ## Notes
 
+- The API launches the binaries configured in `app/main.py` with sensible defaults per
+  tool (e.g., `nmap -sV -T4 <target>`, `dirsearch -u <target>`). Each tool advertises
+  whether a target is required, the default arguments applied, and a hint for the
+  target format in the UI.
+- `/tools` returns availability, default arguments, and target requirements; the UI
+  renders those as chips, disables running missing binaries, and blocks execution when
+  a required target is empty.
 - The API simply launches the binaries configured in `app/main.py`. Ensure each tool
   is installed and available in `PATH`. The `/tools` endpoint and UI both show whether
   each binary is currently discoverable.

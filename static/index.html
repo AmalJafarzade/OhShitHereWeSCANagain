@@ -46,6 +46,7 @@
         <h1>Local Recon Orchestrator</h1>
         <p>
           Start your favorite reconnaissance tools locally and watch their output live.
+          Need API docs? Visit <a href="/swagger">Swagger UI</a>.
           Need API docs? Visit <a href="/docs">Swagger UI</a>.
         </p>
       </header>
@@ -54,21 +55,25 @@
         <label for="tool-select">Choose a tool</label>
         <select id="tool-select"></select>
         <small id="tool-description"></small>
+        <div id="tool-meta" class="grid"></div>
       </section>
 
       <section class="grid">
         <div>
           <label for="target-input">Target (e.g. domain or IP)</label>
           <input id="target-input" type="text" placeholder="example.com" />
+          <small id="target-hint"></small>
         </div>
         <div>
           <label for="args-input">Extra arguments (space separated)</label>
           <input id="args-input" type="text" placeholder="-v -p 80" />
+          <small id="default-args"></small>
         </div>
       </section>
 
       <section>
         <button id="run-btn">Run</button>
+        <button id="stop-btn" class="secondary" aria-busy="false" disabled>Stop</button>
         <button id="stop-btn" class="secondary" aria-busy="false">Stop</button>
         <div id="status"></div>
       </section>
@@ -82,12 +87,15 @@
     <script>
       const select = document.getElementById('tool-select');
       const description = document.getElementById('tool-description');
+      const meta = document.getElementById('tool-meta');
       const output = document.getElementById('output');
       const status = document.getElementById('status');
       const targetInput = document.getElementById('target-input');
       const argsInput = document.getElementById('args-input');
       const runBtn = document.getElementById('run-btn');
       const stopBtn = document.getElementById('stop-btn');
+      const targetHint = document.getElementById('target-hint');
+      const defaultArgs = document.getElementById('default-args');
 
       let currentEventSource = null;
       let tools = [];
@@ -95,6 +103,10 @@
       function appendLine(text) {
         output.textContent += `${text}\n`;
         output.scrollTop = output.scrollHeight;
+      }
+
+      function setStatus(text) {
+        status.textContent = text;
       }
 
       async function loadTools() {
@@ -117,6 +129,19 @@
         const availability = tool.available
           ? '<span class="chip ok">Binary found in PATH</span>'
           : '<span class="chip bad">Binary missing from PATH</span>';
+        const targetNeed = tool.requires_target
+          ? '<span class="chip">Target required</span>'
+          : '<span class="chip">Target optional</span>';
+        description.innerHTML = `${tool.description}`;
+        meta.innerHTML = `${availability} ${targetNeed}`;
+        runBtn.toggleAttribute('disabled', !tool.available || (tool.requires_target && !targetInput.value.trim()));
+        targetInput.placeholder = tool.target_hint || 'example.com';
+        targetHint.textContent = tool.requires_target
+          ? 'This tool will not start without a target.'
+          : 'Targets are optional for this tool.';
+        defaultArgs.textContent = tool.default_args.length
+          ? `Default args applied: ${tool.default_args.join(' ')}`
+          : 'No default arguments applied.';
         description.innerHTML = `${tool.description} ${availability}`;
         runBtn.toggleAttribute('disabled', !tool.available);
         description.textContent = tool ? tool.description : '';
@@ -126,6 +151,9 @@
         if (currentEventSource) {
           currentEventSource.close();
           currentEventSource = null;
+          setStatus('Stream closed');
+          stopBtn.setAttribute('aria-busy', 'false');
+          stopBtn.setAttribute('disabled', 'true');
           status.textContent = 'Stream closed';
           stopBtn.setAttribute('aria-busy', 'false');
         }
@@ -148,6 +176,25 @@
           url.searchParams.append('target', target);
         }
 
+        const selected = tools.find((t) => t.name === tool);
+        if (selected?.requires_target && !target) {
+          setStatus('Target is required for this tool.');
+          return;
+        }
+
+        setStatus('Starting...');
+        stopBtn.setAttribute('aria-busy', 'true');
+        stopBtn.removeAttribute('disabled');
+
+        currentEventSource = new EventSource(url);
+        currentEventSource.onmessage = (event) => {
+          setStatus('Streaming output...');
+          appendLine(event.data);
+        };
+        currentEventSource.onerror = () => {
+          appendLine('[connection closed or denied by server]');
+          stopStream();
+          setStatus('No active stream');
         status.textContent = 'Starting...';
         stopBtn.setAttribute('aria-busy', 'true');
 
@@ -163,6 +210,7 @@
       }
 
       select.addEventListener('change', updateDescription);
+      targetInput.addEventListener('input', updateDescription);
       runBtn.addEventListener('click', runTool);
       stopBtn.addEventListener('click', stopStream);
       loadTools();

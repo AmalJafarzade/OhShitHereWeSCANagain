@@ -3,6 +3,9 @@ from __future__ import annotations
 import asyncio
 import shlex
 import shutil
+from dataclasses import dataclass, field
+from pathlib import Path
+from typing import AsyncGenerator, Callable, TypedDict
 from pathlib import Path
 from typing import AsyncGenerator, TypedDict
 from pathlib import Path
@@ -45,6 +48,121 @@ class ToolInfo(TypedDict):
     binary: str
     description: str
     available: bool
+    requires_target: bool
+    default_args: list[str]
+    target_hint: str
+
+
+@dataclass
+class ToolConfig:
+    binary: str
+    description: str
+    builder: Callable[[str, str | None, list[str]], list[str]]
+    requires_target: bool = True
+    default_args: list[str] = field(default_factory=list)
+    target_hint: str = "Target"
+
+
+def _with_target_suffix(binary: str, target: str | None, args: list[str]) -> list[str]:
+    command = [binary]
+    if args:
+        command.extend(args)
+    if target:
+        command.append(target)
+    return command
+
+
+TOOLS: dict[str, ToolConfig] = {
+    "fuzz": ToolConfig(
+        binary="fuzz",
+        description="Generic fuzzing helper for CLI-driven fuzz workflows.",
+        builder=_with_target_suffix,
+        target_hint="Base URL or seed",
+    ),
+    "nmap": ToolConfig(
+        binary="nmap",
+        description="Port scanner and service detector (TCP/UDP).",
+        builder=lambda binary, target, args: [binary, *args, *([target] if target else [])],
+        default_args=["-sV", "-T4"],
+        target_hint="IP or hostname",
+    ),
+    "dirsearch": ToolConfig(
+        binary="dirsearch",
+        description="Directory brute forcer for web paths.",
+        builder=lambda binary, target, args: [
+            binary,
+            "-u",
+            *([target] if target else []),
+            *args,
+        ],
+        target_hint="https://example.com",
+    ),
+    "theHarvester": ToolConfig(
+        binary="theHarvester",
+        description="Open source intelligence gathering tool for emails and hosts.",
+        builder=lambda binary, target, args: [
+            binary,
+            "-d",
+            *([target] if target else []),
+            *args,
+        ],
+        target_hint="example.com",
+    ),
+    "subfinder": ToolConfig(
+        binary="subfinder",
+        description="Passive subdomain enumeration.",
+        builder=lambda binary, target, args: [
+            binary,
+            "-d",
+            *([target] if target else []),
+            *args,
+        ],
+        target_hint="example.com",
+    ),
+    "httpx": ToolConfig(
+        binary="httpx",
+        description="HTTP probing tool for discovering live hosts.",
+        builder=lambda binary, target, args: [
+            binary,
+            "-u",
+            *([target] if target else []),
+            *args,
+        ],
+        target_hint="https://example.com",
+    ),
+    "dalfox": ToolConfig(
+        binary="dalfox",
+        description="XSS scanning utility with smart payloads.",
+        builder=lambda binary, target, args: [
+            binary,
+            "url",
+            *([target] if target else []),
+            *args,
+        ],
+        target_hint="https://example.com",
+    ),
+    "nuclei": ToolConfig(
+        binary="nuclei",
+        description="Fast template-based vulnerability scanner.",
+        builder=lambda binary, target, args: [
+            binary,
+            "-u",
+            *([target] if target else []),
+            *args,
+        ],
+        target_hint="https://example.com",
+    ),
+    "sublist3r": ToolConfig(
+        binary="sublist3r",
+        description="Fast subdomains enumeration tool.",
+        builder=lambda binary, target, args: [
+            binary,
+            "-d",
+            *([target] if target else []),
+            *args,
+        ],
+        target_hint="example.com",
+    ),
 
 
 TOOLS = {
@@ -88,6 +206,13 @@ async def list_tools() -> list[ToolInfo]:
     return [
         {
             "name": name,
+            "binary": cfg.binary,
+            "description": cfg.description,
+            "available": shutil.which(cfg.binary) is not None,
+            "requires_target": cfg.requires_target,
+            "default_args": cfg.default_args,
+            "target_hint": cfg.target_hint,
+        }
             "binary": cfg["binary"],
             "description": cfg["description"],
             "available": shutil.which(cfg["binary"]) is not None,
@@ -141,6 +266,25 @@ async def run_tool(
     if tool_name not in TOOLS:
         raise HTTPException(status_code=404, detail="Unknown tool")
 
+    cfg = TOOLS[tool_name]
+    binary = shutil.which(cfg.binary)
+    if not binary:
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                f"Binary '{cfg.binary}' was not found in PATH. "
+                "Install it or update the TOOLS mapping."
+            ),
+        )
+
+    if cfg.requires_target and not target:
+        raise HTTPException(
+            status_code=400,
+            detail="This tool requires a target (domain, URL, or IP).",
+        )
+
+    combined_args = cfg.default_args + args
+    command = cfg.builder(binary, target, combined_args)
     binary = shutil.which(TOOLS[tool_name]["binary"])
     if not binary:
         raise HTTPException(
