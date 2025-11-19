@@ -1,0 +1,152 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Local Recon Orchestrator</title>
+    <link
+      rel="stylesheet"
+      href="https://cdn.jsdelivr.net/npm/@picocss/pico@2/css/pico.min.css"
+    />
+    <style>
+      body {
+        padding: 1rem;
+      }
+      pre {
+        background: #0b0c10;
+        color: #e5e7eb;
+        border-radius: 0.5rem;
+        padding: 1rem;
+        min-height: 320px;
+        overflow: auto;
+        font-size: 0.9rem;
+      }
+      .chip {
+        display: inline-block;
+        background: #e5e7eb;
+        color: #0b0c10;
+        padding: 0.25rem 0.5rem;
+        border-radius: 999px;
+        margin-right: 0.25rem;
+        font-size: 0.85rem;
+      }
+    </style>
+  </head>
+  <body>
+    <main class="container">
+      <header>
+        <h1>Local Recon Orchestrator</h1>
+        <p>
+          Start your favorite reconnaissance tools locally and watch their output live.
+          Need API docs? Visit <a href="/docs">Swagger UI</a>.
+        </p>
+      </header>
+
+      <section>
+        <label for="tool-select">Choose a tool</label>
+        <select id="tool-select"></select>
+        <small id="tool-description"></small>
+      </section>
+
+      <section class="grid">
+        <div>
+          <label for="target-input">Target (e.g. domain or IP)</label>
+          <input id="target-input" type="text" placeholder="example.com" />
+        </div>
+        <div>
+          <label for="args-input">Extra arguments (space separated)</label>
+          <input id="args-input" type="text" placeholder="-v -p 80" />
+        </div>
+      </section>
+
+      <section>
+        <button id="run-btn">Run</button>
+        <button id="stop-btn" class="secondary" aria-busy="false">Stop</button>
+        <div id="status"></div>
+      </section>
+
+      <section>
+        <label>Live output</label>
+        <pre id="output"></pre>
+      </section>
+    </main>
+
+    <script>
+      const select = document.getElementById('tool-select');
+      const description = document.getElementById('tool-description');
+      const output = document.getElementById('output');
+      const status = document.getElementById('status');
+      const targetInput = document.getElementById('target-input');
+      const argsInput = document.getElementById('args-input');
+      const runBtn = document.getElementById('run-btn');
+      const stopBtn = document.getElementById('stop-btn');
+
+      let currentEventSource = null;
+      let tools = [];
+
+      function appendLine(text) {
+        output.textContent += `${text}\n`;
+        output.scrollTop = output.scrollHeight;
+      }
+
+      async function loadTools() {
+        const res = await fetch('/tools');
+        tools = await res.json();
+        select.innerHTML = tools
+          .map((tool) => `<option value="${tool.name}">${tool.name}</option>`)
+          .join('');
+        updateDescription();
+      }
+
+      function updateDescription() {
+        const tool = tools.find((t) => t.name === select.value);
+        description.textContent = tool ? tool.description : '';
+      }
+
+      function stopStream() {
+        if (currentEventSource) {
+          currentEventSource.close();
+          currentEventSource = null;
+          status.textContent = 'Stream closed';
+          stopBtn.setAttribute('aria-busy', 'false');
+        }
+      }
+
+      function runTool() {
+        stopStream();
+        output.textContent = '';
+        const tool = select.value;
+        const url = new URL(`/run/${tool}`, window.location.origin);
+        const args = argsInput.value.trim();
+        if (args) {
+          args
+            .split(/\s+/)
+            .filter(Boolean)
+            .forEach((arg) => url.searchParams.append('args', arg));
+        }
+        const target = targetInput.value.trim();
+        if (target) {
+          url.searchParams.append('target', target);
+        }
+
+        status.textContent = 'Starting...';
+        stopBtn.setAttribute('aria-busy', 'true');
+
+        currentEventSource = new EventSource(url);
+        currentEventSource.onmessage = (event) => {
+          status.textContent = 'Streaming output...';
+          appendLine(event.data);
+        };
+        currentEventSource.onerror = () => {
+          appendLine('[connection closed]');
+          stopStream();
+        };
+      }
+
+      select.addEventListener('change', updateDescription);
+      runBtn.addEventListener('click', runTool);
+      stopBtn.addEventListener('click', stopStream);
+      loadTools();
+    </script>
+  </body>
+</html>
