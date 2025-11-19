@@ -47,6 +47,7 @@
         <p>
           Start your favorite reconnaissance tools locally and watch their output live.
           Need API docs? Visit <a href="/swagger">Swagger UI</a>.
+          Need API docs? Visit <a href="/docs">Swagger UI</a>.
         </p>
       </header>
 
@@ -73,6 +74,7 @@
       <section>
         <button id="run-btn">Run</button>
         <button id="stop-btn" class="secondary" aria-busy="false" disabled>Stop</button>
+        <button id="stop-btn" class="secondary" aria-busy="false">Stop</button>
         <div id="status"></div>
       </section>
 
@@ -140,6 +142,9 @@
         defaultArgs.textContent = tool.default_args.length
           ? `Default args applied: ${tool.default_args.join(' ')}`
           : 'No default arguments applied.';
+        description.innerHTML = `${tool.description} ${availability}`;
+        runBtn.toggleAttribute('disabled', !tool.available);
+        description.textContent = tool ? tool.description : '';
       }
 
       function stopStream() {
@@ -149,6 +154,8 @@
           setStatus('Stream closed');
           stopBtn.setAttribute('aria-busy', 'false');
           stopBtn.setAttribute('disabled', 'true');
+          status.textContent = 'Stream closed';
+          stopBtn.setAttribute('aria-busy', 'false');
         }
       }
 
@@ -188,6 +195,17 @@
           appendLine('[connection closed or denied by server]');
           stopStream();
           setStatus('No active stream');
+        status.textContent = 'Starting...';
+        stopBtn.setAttribute('aria-busy', 'true');
+
+        currentEventSource = new EventSource(url);
+        currentEventSource.onmessage = (event) => {
+          status.textContent = 'Streaming output...';
+          appendLine(event.data);
+        };
+        currentEventSource.onerror = () => {
+          appendLine('[connection closed]');
+          stopStream();
         };
       }
 

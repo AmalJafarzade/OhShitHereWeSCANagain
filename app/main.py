@@ -6,6 +6,10 @@ import shutil
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import AsyncGenerator, Callable, TypedDict
+from pathlib import Path
+from typing import AsyncGenerator, TypedDict
+from pathlib import Path
+from typing import AsyncGenerator
 
 from fastapi import FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
@@ -159,6 +163,39 @@ TOOLS: dict[str, ToolConfig] = {
         ],
         target_hint="example.com",
     ),
+
+
+TOOLS = {
+    "fuzz": {
+        "binary": "fuzz",
+        "description": "Generic fuzzing helper. Ensure the binary is available locally.",
+    },
+    "nmap": {"binary": "nmap", "description": "Port scanner and service detector."},
+    "dirsearch": {
+        "binary": "dirsearch",
+        "description": "Directory brute forcer for web paths.",
+    },
+    "theHarvester": {
+        "binary": "theHarvester",
+        "description": "Open source intelligence gathering tool.",
+    },
+    "Subfinder": {
+        "binary": "subfinder",
+        "description": "Passive subdomain enumeration.",
+    },
+    "httpx": {
+        "binary": "httpx",
+        "description": "HTTP probing tool for discovering live hosts.",
+    },
+    "dalfox": {"binary": "dalfox", "description": "XSS scanning utility."},
+    "nuclei": {
+        "binary": "nuclei",
+        "description": "Fast template-based vulnerability scanner.",
+    },
+    "sublist3r": {
+        "binary": "sublist3r",
+        "description": "Fast subdomains enumeration tool.",
+    },
 }
 
 
@@ -176,6 +213,15 @@ async def list_tools() -> list[ToolInfo]:
             "default_args": cfg.default_args,
             "target_hint": cfg.target_hint,
         }
+            "binary": cfg["binary"],
+            "description": cfg["description"],
+            "available": shutil.which(cfg["binary"]) is not None,
+        }
+async def list_tools() -> list[dict[str, str]]:
+    """Return the configured tools along with their binaries and descriptions."""
+
+    return [
+        {"name": name, "binary": cfg["binary"], "description": cfg["description"]}
         for name, cfg in TOOLS.items()
     ]
 
@@ -239,6 +285,18 @@ async def run_tool(
 
     combined_args = cfg.default_args + args
     command = cfg.builder(binary, target, combined_args)
+    binary = shutil.which(TOOLS[tool_name]["binary"])
+    if not binary:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Binary '{TOOLS[tool_name]['binary']}' was not found in PATH. Install it or update the TOOLS mapping.",
+        )
+
+    command = [binary]
+    command = [TOOLS[tool_name]["binary"]]
+    command.extend(args)
+    if target:
+        command.append(target)
 
     return StreamingResponse(stream_command(command), media_type="text/event-stream")
 
