@@ -1,0 +1,201 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Local Recon Orchestrator</title>
+    <link
+      rel="stylesheet"
+      href="https://cdn.jsdelivr.net/npm/@picocss/pico@2/css/pico.min.css"
+    />
+    <style>
+      body {
+        padding: 1rem;
+      }
+      pre {
+        background: #0b0c10;
+        color: #e5e7eb;
+        border-radius: 0.5rem;
+        padding: 1rem;
+        min-height: 320px;
+        overflow: auto;
+        font-size: 0.9rem;
+      }
+      .chip {
+        display: inline-block;
+        background: #e5e7eb;
+        color: #0b0c10;
+        padding: 0.25rem 0.5rem;
+        border-radius: 999px;
+        margin-right: 0.25rem;
+        font-size: 0.85rem;
+      }
+      .chip.ok {
+        background: #d1fae5;
+        color: #065f46;
+      }
+      .chip.bad {
+        background: #fee2e2;
+        color: #991b1b;
+      }
+    </style>
+  </head>
+  <body>
+    <main class="container">
+      <header>
+        <h1>Local Recon Orchestrator</h1>
+        <p>
+          Start your favorite reconnaissance tools locally and watch their output live.
+          Need API docs? Visit <a href="/swagger">Swagger UI</a>.
+        </p>
+      </header>
+
+      <section>
+        <label for="tool-select">Choose a tool</label>
+        <select id="tool-select"></select>
+        <small id="tool-description"></small>
+        <div id="tool-meta" class="grid"></div>
+      </section>
+
+      <section class="grid">
+        <div>
+          <label for="target-input">Target (e.g. domain or IP)</label>
+          <input id="target-input" type="text" placeholder="example.com" />
+          <small id="target-hint"></small>
+        </div>
+        <div>
+          <label for="args-input">Extra arguments (space separated)</label>
+          <input id="args-input" type="text" placeholder="-v -p 80" />
+          <small id="default-args"></small>
+        </div>
+      </section>
+
+      <section>
+        <button id="run-btn">Run</button>
+        <button id="stop-btn" class="secondary" aria-busy="false" disabled>Stop</button>
+        <div id="status"></div>
+      </section>
+
+      <section>
+        <label>Live output</label>
+        <pre id="output"></pre>
+      </section>
+    </main>
+
+    <script>
+      const select = document.getElementById('tool-select');
+      const description = document.getElementById('tool-description');
+      const meta = document.getElementById('tool-meta');
+      const output = document.getElementById('output');
+      const status = document.getElementById('status');
+      const targetInput = document.getElementById('target-input');
+      const argsInput = document.getElementById('args-input');
+      const runBtn = document.getElementById('run-btn');
+      const stopBtn = document.getElementById('stop-btn');
+      const targetHint = document.getElementById('target-hint');
+      const defaultArgs = document.getElementById('default-args');
+
+      let currentEventSource = null;
+      let tools = [];
+
+      function appendLine(text) {
+        output.textContent += `${text}\n`;
+        output.scrollTop = output.scrollHeight;
+      }
+
+      function setStatus(text) {
+        status.textContent = text;
+      }
+
+      async function loadTools() {
+        const res = await fetch('/tools');
+        tools = await res.json();
+        select.innerHTML = tools
+          .map((tool) => `<option value="${tool.name}">${tool.name}</option>`)
+          .join('');
+        updateDescription();
+      }
+
+      function updateDescription() {
+        const tool = tools.find((t) => t.name === select.value);
+        if (!tool) {
+          description.textContent = '';
+          runBtn.setAttribute('disabled', 'true');
+          return;
+        }
+
+        const availability = tool.available
+          ? '<span class="chip ok">Binary found in PATH</span>'
+          : '<span class="chip bad">Binary missing from PATH</span>';
+        const targetNeed = tool.requires_target
+          ? '<span class="chip">Target required</span>'
+          : '<span class="chip">Target optional</span>';
+        description.innerHTML = `${tool.description}`;
+        meta.innerHTML = `${availability} ${targetNeed}`;
+        runBtn.toggleAttribute('disabled', !tool.available || (tool.requires_target && !targetInput.value.trim()));
+        targetInput.placeholder = tool.target_hint || 'example.com';
+        targetHint.textContent = tool.requires_target
+          ? 'This tool will not start without a target.'
+          : 'Targets are optional for this tool.';
+        defaultArgs.textContent = tool.default_args.length
+          ? `Default args applied: ${tool.default_args.join(' ')}`
+          : 'No default arguments applied.';
+      }
+
+      function stopStream() {
+        if (currentEventSource) {
+          currentEventSource.close();
+          currentEventSource = null;
+          setStatus('Stream closed');
+          stopBtn.setAttribute('aria-busy', 'false');
+          stopBtn.setAttribute('disabled', 'true');
+        }
+      }
+
+      function runTool() {
+        stopStream();
+        output.textContent = '';
+        const tool = select.value;
+        const url = new URL(`/run/${tool}`, window.location.origin);
+        const args = argsInput.value.trim();
+        if (args) {
+          args
+            .split(/\s+/)
+            .filter(Boolean)
+            .forEach((arg) => url.searchParams.append('args', arg));
+        }
+        const target = targetInput.value.trim();
+        if (target) {
+          url.searchParams.append('target', target);
+        }
+
+        const selected = tools.find((t) => t.name === tool);
+        if (selected?.requires_target && !target) {
+          setStatus('Target is required for this tool.');
+          return;
+        }
+
+        setStatus('Starting...');
+        stopBtn.setAttribute('aria-busy', 'true');
+        stopBtn.removeAttribute('disabled');
+
+        currentEventSource = new EventSource(url);
+        currentEventSource.onmessage = (event) => {
+          setStatus('Streaming output...');
+          appendLine(event.data);
+        };
+        currentEventSource.onerror = () => {
+          appendLine('[connection closed or denied by server]');
+          stopStream();
+          setStatus('No active stream');
+        };
+      }
+
+      select.addEventListener('change', updateDescription);
+      targetInput.addEventListener('input', updateDescription);
+      runBtn.addEventListener('click', runTool);
+      stopBtn.addEventListener('click', stopStream);
+      loadTools();
+    </script>
+  </body>
+</html>
